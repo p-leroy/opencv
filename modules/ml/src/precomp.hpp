@@ -321,6 +321,7 @@ namespace ml
         virtual bool train( const Ptr<TrainData>& trainData, int flags ) CV_OVERRIDE;
 
         virtual int addTree( const vector<int>& sidx );
+        virtual int addTreeMP( const vector<int>& sidx );
         virtual int addNodeAndTrySplit( int parent, const vector<int>& sidx );
         virtual const vector<int>& getActiveVars();
         virtual int findBestSplit( const vector<int>& _sidx );

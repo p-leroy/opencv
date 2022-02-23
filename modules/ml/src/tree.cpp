@@ -348,6 +348,114 @@ int DTreesImpl::addTree(const vector<int>& sidx )
     return root;
 }
 
+int DTreesImpl::addTreeMP(const vector<int>& sidx )
+{
+    size_t n = (params.getMaxDepth() > 0 ? (1 << params.getMaxDepth()) : 1024) + w->wnodes.size();
+
+    w->wnodes.reserve(n);
+    w->wsplits.reserve(n);
+    w->wsubsets.reserve(n*w->maxSubsetSize);
+    w->wnodes.clear();
+    w->wsplits.clear();
+    w->wsubsets.clear();
+
+    int cv_n = params.getCVFolds();
+
+    if( cv_n > 0 )
+    {
+        w->cv_Tn.resize(n*cv_n);
+        w->cv_node_error.resize(n*cv_n);
+        w->cv_node_risk.resize(n*cv_n);
+    }
+
+    // build the tree recursively
+    int w_root = addNodeAndTrySplit(-1, sidx);
+    int maxdepth = INT_MAX;//pruneCV(root);
+
+    int w_nidx = w_root, pidx = -1, depth = 0;
+    int root = (int)nodes.size();
+
+    for(;;)
+    {
+        const WNode& wnode = w->wnodes[w_nidx];
+        Node node;
+        node.parent = pidx;
+        node.classIdx = wnode.class_idx;
+        node.value = wnode.value;
+        node.defaultDir = wnode.defaultDir;
+
+        int wsplit_idx = wnode.split;
+        if( wsplit_idx >= 0 )
+        {
+            const WSplit& wsplit = w->wsplits[wsplit_idx];
+            Split split;
+            split.c = wsplit.c;
+            split.quality = wsplit.quality;
+            split.inversed = wsplit.inversed;
+            split.varIdx = wsplit.varIdx;
+            split.subsetOfs = -1;
+            if( wsplit.subsetOfs >= 0 )
+            {
+                int ssize = getSubsetSize(split.varIdx);
+                split.subsetOfs = (int)subsets.size();
+                subsets.resize(split.subsetOfs + ssize);
+                // This check verifies that subsets index is in the correct range
+                // as in case ssize == 0 no real resize performed.
+                // Thus memory kept safe.
+                // Also this skips useless memcpy call when size parameter is zero
+                if(ssize > 0)
+                {
+                    memcpy(&subsets[split.subsetOfs], &w->wsubsets[wsplit.subsetOfs], ssize*sizeof(int));
+                }
+            }
+            node.split = (int)splits.size();
+            splits.push_back(split);
+        }
+        int nidx = (int)nodes.size();
+        nodes.push_back(node);
+        if( pidx >= 0 )
+        {
+            int w_pidx = w->wnodes[w_nidx].parent;
+            if( w->wnodes[w_pidx].left == w_nidx )
+            {
+                nodes[pidx].left = nidx;
+            }
+            else
+            {
+                CV_Assert(w->wnodes[w_pidx].right == w_nidx);
+                nodes[pidx].right = nidx;
+            }
+        }
+
+        if( wnode.left >= 0 && depth+1 < maxdepth )
+        {
+            w_nidx = wnode.left;
+            pidx = nidx;
+            depth++;
+        }
+        else
+        {
+            int w_pidx = wnode.parent;
+            while( w_pidx >= 0 && w->wnodes[w_pidx].right == w_nidx )
+            {
+                w_nidx = w_pidx;
+                w_pidx = w->wnodes[w_pidx].parent;
+                nidx = pidx;
+                pidx = nodes[pidx].parent;
+                depth--;
+            }
+
+            if( w_pidx < 0 )
+                break;
+
+            w_nidx = w->wnodes[w_pidx].right;
+            CV_Assert( w_nidx >= 0 );
+        }
+    }
+    roots.push_back(root);
+    return root;
+}
+
 void DTreesImpl::setDParams(const TreeParams& _params)
 {
     params = _params;
