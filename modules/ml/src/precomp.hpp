@@ -321,8 +321,9 @@ namespace ml
         virtual bool train( const Ptr<TrainData>& trainData, int flags ) CV_OVERRIDE;
 
         virtual int addTree( const vector<int>& sidx );
-        virtual int addTreeMP( const vector<int>& sidx );
+        virtual int addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& _data );
         virtual int addNodeAndTrySplit( int parent, const vector<int>& sidx );
+        virtual int addNodeAndTrySplit_MP( int parent, const vector<int>& sidx, WorkData& lw );
         virtual const vector<int>& getActiveVars();
         virtual int findBestSplit( const vector<int>& _sidx );
         virtual void calcValue( int nidx, const vector<int>& _sidx );
@@ -379,6 +380,8 @@ namespace ml
         bool _isClassifier;
 
         Ptr<WorkData> w;
+
+        Mutex mutex; // AutoLock lockGuard(mutex);
     };
 
     template <typename T>

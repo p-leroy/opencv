@@ -348,24 +348,26 @@ int DTreesImpl::addTree(const vector<int>& sidx )
     return root;
 }
 
-int DTreesImpl::addTreeMP(const vector<int>& sidx )
+int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& trainData )
 {
     size_t n = (params.getMaxDepth() > 0 ? (1 << params.getMaxDepth()) : 1024) + w->wnodes.size();
 
-    w->wnodes.reserve(n);
-    w->wsplits.reserve(n);
-    w->wsubsets.reserve(n*w->maxSubsetSize);
-    w->wnodes.clear();
-    w->wsplits.clear();
-    w->wsubsets.clear();
+    Ptr<WorkData> lw = makePtr<WorkData>(trainData);
+
+    lw->wnodes.reserve(n);
+    lw->wsplits.reserve(n);
+    lw->wsubsets.reserve(n*w->maxSubsetSize);
+    lw->wnodes.clear();
+    lw->wsplits.clear();
+    lw->wsubsets.clear();
 
     int cv_n = params.getCVFolds();
 
     if( cv_n > 0 )
     {
-        w->cv_Tn.resize(n*cv_n);
-        w->cv_node_error.resize(n*cv_n);
-        w->cv_node_risk.resize(n*cv_n);
+        lw->cv_Tn.resize(n*cv_n);
+        lw->cv_node_error.resize(n*cv_n);
+        lw->cv_node_risk.resize(n*cv_n);
     }
 
     // build the tree recursively
@@ -375,9 +377,13 @@ int DTreesImpl::addTreeMP(const vector<int>& sidx )
     int w_nidx = w_root, pidx = -1, depth = 0;
     int root = (int)nodes.size();
 
+    vector<Node> l_nodes;
+    vector<Split> l_splits;
+    vector<int> l_subsets;
+
     for(;;)
     {
-        const WNode& wnode = w->wnodes[w_nidx];
+        const WNode& wnode = lw->wnodes[w_nidx];
         Node node;
         node.parent = pidx;
         node.classIdx = wnode.class_idx;
@@ -387,7 +393,7 @@ int DTreesImpl::addTreeMP(const vector<int>& sidx )
         int wsplit_idx = wnode.split;
         if( wsplit_idx >= 0 )
         {
-            const WSplit& wsplit = w->wsplits[wsplit_idx];
+            const WSplit& wsplit = lw->wsplits[wsplit_idx];
             Split split;
             split.c = wsplit.c;
             split.quality = wsplit.quality;
@@ -398,21 +404,21 @@ int DTreesImpl::addTreeMP(const vector<int>& sidx )
             {
                 int ssize = getSubsetSize(split.varIdx);
                 split.subsetOfs = (int)subsets.size();
-                subsets.resize(split.subsetOfs + ssize);
+                l_subsets.resize(split.subsetOfs + ssize);
                 // This check verifies that subsets index is in the correct range
                 // as in case ssize == 0 no real resize performed.
                 // Thus memory kept safe.
                 // Also this skips useless memcpy call when size parameter is zero
                 if(ssize > 0)
                 {
-                    memcpy(&subsets[split.subsetOfs], &w->wsubsets[wsplit.subsetOfs], ssize*sizeof(int));
+                    memcpy(&l_subsets[split.subsetOfs], &lw->wsubsets[wsplit.subsetOfs], ssize*sizeof(int));
                 }
             }
             node.split = (int)splits.size();
-            splits.push_back(split);
+            l_splits.push_back(split);
         }
         int nidx = (int)nodes.size();
-        nodes.push_back(node);
+        l_nodes.push_back(node);
         if( pidx >= 0 )
         {
             int w_pidx = w->wnodes[w_nidx].parent;
@@ -439,7 +445,7 @@ int DTreesImpl::addTreeMP(const vector<int>& sidx )
             while( w_pidx >= 0 && w->wnodes[w_pidx].right == w_nidx )
             {
                 w_nidx = w_pidx;
-                w_pidx = w->wnodes[w_pidx].parent;
+                w_pidx = lw->wnodes[w_pidx].parent;
                 nidx = pidx;
                 pidx = nodes[pidx].parent;
                 depth--;
@@ -448,10 +454,18 @@ int DTreesImpl::addTreeMP(const vector<int>& sidx )
             if( w_pidx < 0 )
                 break;
 
-            w_nidx = w->wnodes[w_pidx].right;
+            w_nidx = lw->wnodes[w_pidx].right;
             CV_Assert( w_nidx >= 0 );
         }
     }
+
+    AutoLock lockGuard(mutex);
+    for (Node node : l_nodes)
+        nodes.push_back(node);
+    for (Split split : l_splits)
+        splits.push_back(split);
+    for (int subset : l_subsets)
+        subsets.push_back(subset);
     roots.push_back(root);
     return root;
 }
@@ -489,6 +503,69 @@ int DTreesImpl::addNodeAndTrySplit( int parent, const vector<int>& sidx )
     else if( _isClassifier )
     {
         const int* responses = &w->cat_responses[0];
+        const int* s = &sidx[0];
+        int first = responses[s[0]];
+        for( i = 1; i < n; i++ )
+            if( responses[s[i]] != first )
+                break;
+        if( i == n )
+            can_split = false;
+    }
+    else
+    {
+        if( sqrt(node.node_risk) < params.getRegressionAccuracy() )
+            can_split = false;
+    }
+
+    if( can_split )
+        node.split = findBestSplit( sidx );
+
+    //printf("depth=%d, nidx=%d, parent=%d, n=%d, %s, value=%.1f, risk=%.1f\n", node.depth, nidx, node.parent, n, (node.split < 0 ? "leaf" : varType[w->wsplits[node.split].varIdx] == VAR_CATEGORICAL ? "cat" : "ord"), node.value, node.node_risk);
+
+    if( node.split >= 0 )
+    {
+        node.defaultDir = calcDir( node.split, sidx, sleft, sright );
+        if( params.useSurrogates )
+            CV_Error( CV_StsNotImplemented, "surrogate splits are not implemented yet");
+
+        int left = addNodeAndTrySplit( nidx, sleft );
+        int right = addNodeAndTrySplit( nidx, sright );
+        w->wnodes[nidx].left = left;
+        w->wnodes[nidx].right = right;
+        CV_Assert( w->wnodes[nidx].left > 0 && w->wnodes[nidx].right > 0 );
+    }
+
+    return nidx;
+}
+
+int DTreesImpl::addNodeAndTrySplit_MP( int parent, const vector<int>& sidx, WorkData &lw )
+{
+    lw.wnodes.push_back(WNode());
+    int nidx = (int)(lw.wnodes.size() - 1);
+    WNode& node = lw.wnodes.back();
+
+    node.parent = parent;
+    node.depth = parent >= 0 ? lw.wnodes[parent].depth + 1 : 0;
+    int nfolds = params.getCVFolds();
+
+    if( nfolds > 0 )
+    {
+        lw.cv_Tn.resize((nidx+1)*nfolds);
+        lw.cv_node_error.resize((nidx+1)*nfolds);
+        lw.cv_node_risk.resize((nidx+1)*nfolds);
+    }
+
+    int i, n = node.sample_count = (int)sidx.size();
+    bool can_split = true;
+    vector<int> sleft, sright;
+
+    calcValue( nidx, sidx );
+
+    if( n <= params.getMinSampleCount() || node.depth >= params.getMaxDepth() )
+        can_split = false;
+    else if( _isClassifier )
+    {
+        const int* responses = &lw.cat_responses[0];
         const int* s = &sidx[0];
         int first = responses[s[0]];
         for( i = 1; i < n; i++ )
