@@ -41,6 +41,9 @@
 //M*/
 
 #include "precomp.hpp"
+#include <opencv2/core/utils/logger.hpp>
+#include <iostream>
+
 namespace cv {
 namespace ml {
 
@@ -644,6 +647,16 @@ public:
         return impl.train(trainData, flags);
     }
 
+    bool train_MP( InputArray samples, int layout, InputArray responses ) CV_OVERRIDE
+    {
+        CV_TRACE_FUNCTION();
+        //CV_Assert(!trainData.empty());
+        std::cout << "test" << std::endl;
+        if (impl.getCVFolds() != 0)
+            CV_Error(Error::StsBadArg, "Cross validation for RTrees is not implemented");
+        return impl.train_MP(TrainData::create(samples, layout, responses), 0);
+    }
+
     float predict( InputArray samples, OutputArray results, int flags ) const CV_OVERRIDE
     {
         CV_TRACE_FUNCTION();
@@ -675,13 +688,12 @@ public:
     const vector<int>& getSubsets() const CV_OVERRIDE { return impl.getSubsets(); }
     double getOOBError() const CV_OVERRIDE { return impl.getOOBError(); }
 
-
     DTreesImplForRTrees impl;
 };
 
-
 Ptr<RTrees> RTrees::create()
 {
+    cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_VERBOSE);
     CV_TRACE_FUNCTION();
     return makePtr<RTreesImpl>();
 }
