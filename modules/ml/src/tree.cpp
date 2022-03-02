@@ -44,6 +44,8 @@
 #include <ctype.h>
 
 #include <opencv2/core/utils/logger.hpp>
+#include <iostream>
+#include <string>
 
 namespace cv {
 namespace ml {
@@ -348,11 +350,19 @@ int DTreesImpl::addTree(const vector<int>& sidx )
     return root;
 }
 
+void myPrint(std::string msg) {std::cout << "[DTreesImpl::addTree_MP] " << msg << std::endl;}
+
 int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& trainData )
 {
+    myPrint("start");
+
     size_t n = (params.getMaxDepth() > 0 ? (1 << params.getMaxDepth()) : 1024) + w->wnodes.size();
 
+    myPrint("a-");
+
     Ptr<WorkData> lw = makePtr<WorkData>(trainData);
+
+    myPrint("a");
 
     lw->wnodes.reserve(n);
     lw->wsplits.reserve(n);
@@ -361,7 +371,11 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
     lw->wsplits.clear();
     lw->wsubsets.clear();
 
+    myPrint("b");
+
     int cv_n = params.getCVFolds();
+
+    myPrint("c");
 
     if( cv_n > 0 )
     {
@@ -369,6 +383,8 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
         lw->cv_node_error.resize(n*cv_n);
         lw->cv_node_risk.resize(n*cv_n);
     }
+
+    myPrint("d");
 
     // build the tree recursively
     int w_root = addNodeAndTrySplit(-1, sidx);
@@ -381,6 +397,8 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
     vector<Split> l_splits;
     vector<int> l_subsets;
 
+    myPrint("e");
+
     for(;;)
     {
         const WNode& wnode = lw->wnodes[w_nidx];
@@ -389,6 +407,8 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
         node.classIdx = wnode.class_idx;
         node.value = wnode.value;
         node.defaultDir = wnode.defaultDir;
+
+         myPrint("e0");
 
         int wsplit_idx = wnode.split;
         if( wsplit_idx >= 0 )
@@ -418,7 +438,9 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
             l_splits.push_back(split);
         }
         int nidx = (int)nodes.size();
+        myPrint("e01");
         l_nodes.push_back(node);
+         myPrint("e1");
         if( pidx >= 0 )
         {
             int w_pidx = w->wnodes[w_nidx].parent;
@@ -458,6 +480,8 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
             CV_Assert( w_nidx >= 0 );
         }
     }
+
+    myPrint("f");
 
     AutoLock lockGuard(mutex);
     for (Node node : l_nodes)

@@ -42,7 +42,9 @@
 
 #include "precomp.hpp"
 #include <opencv2/core/utils/logger.hpp>
+
 #include <iostream>
+#include <string>
 
 namespace cv {
 namespace ml {
@@ -301,9 +303,17 @@ public:
         return true;
     }
 
+    void myPrint(std::string msg){std::cout << "[train_MP] " << msg << std::endl;}
+
     bool train_MP( const Ptr<TrainData>& trainData, int flags )
     {
         CV_TRACE_FUNCTION();
+
+//        cv::utils::logging::internal::writeLogMessage(cv::utils::logging::LOG_LEVEL_INFO, "[train_MP]");
+//        CV_LOG_INFO(NULL, "[train_MP]");
+
+        myPrint("start");
+
         RNG &rng = theRNG();
         CV_Assert(!trainData.empty());
         startTraining(trainData, flags);
@@ -651,7 +661,10 @@ public:
     {
         CV_TRACE_FUNCTION();
         //CV_Assert(!trainData.empty());
-        std::cout << "test" << std::endl;
+        std::cout << "[RTreesImpl::train_MP]" << std::endl;
+        std::cout << "[RTreesImpl::train_MP] cv::utils::logging::setLogLevel" << std::endl;
+        cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_INFO);
+        std::cout << "[RTreesImpl::train_MP] LOG_LEVEL_INFO " << cv::utils::logging::LOG_LEVEL_INFO << std::endl;
         if (impl.getCVFolds() != 0)
             CV_Error(Error::StsBadArg, "Cross validation for RTrees is not implemented");
         return impl.train_MP(TrainData::create(samples, layout, responses), 0);
