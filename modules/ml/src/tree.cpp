@@ -360,16 +360,16 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
 
     myPrint("a-");
 
-    Ptr<WorkData> lw = makePtr<WorkData>(trainData);
+    WorkData lw = WorkData(trainData);
 
     myPrint("a");
 
-    lw->wnodes.reserve(n);
-    lw->wsplits.reserve(n);
-    lw->wsubsets.reserve(n*w->maxSubsetSize);
-    lw->wnodes.clear();
-    lw->wsplits.clear();
-    lw->wsubsets.clear();
+    lw.wnodes.reserve(n);
+    lw.wsplits.reserve(n);
+    lw.wsubsets.reserve(n*w->maxSubsetSize);
+    lw.wnodes.clear();
+    lw.wsplits.clear();
+    lw.wsubsets.clear();
 
     myPrint("b");
 
@@ -379,15 +379,15 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
 
     if( cv_n > 0 )
     {
-        lw->cv_Tn.resize(n*cv_n);
-        lw->cv_node_error.resize(n*cv_n);
-        lw->cv_node_risk.resize(n*cv_n);
+        lw.cv_Tn.resize(n*cv_n);
+        lw.cv_node_error.resize(n*cv_n);
+        lw.cv_node_risk.resize(n*cv_n);
     }
 
     myPrint("d");
 
     // build the tree recursively
-    int w_root = addNodeAndTrySplit(-1, sidx);
+    int w_root = addNodeAndTrySplit_MP(-1, sidx, lw);
     int maxdepth = INT_MAX;//pruneCV(root);
 
     int w_nidx = w_root, pidx = -1, depth = 0;
@@ -401,7 +401,7 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
 
     for(;;)
     {
-        const WNode& wnode = lw->wnodes[w_nidx];
+        const WNode& wnode = lw.wnodes[w_nidx];
         Node node;
         node.parent = pidx;
         node.classIdx = wnode.class_idx;
@@ -413,7 +413,7 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
         int wsplit_idx = wnode.split;
         if( wsplit_idx >= 0 )
         {
-            const WSplit& wsplit = lw->wsplits[wsplit_idx];
+            const WSplit& wsplit = lw.wsplits[wsplit_idx];
             Split split;
             split.c = wsplit.c;
             split.quality = wsplit.quality;
@@ -431,7 +431,7 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
                 // Also this skips useless memcpy call when size parameter is zero
                 if(ssize > 0)
                 {
-                    memcpy(&l_subsets[split.subsetOfs], &lw->wsubsets[wsplit.subsetOfs], ssize*sizeof(int));
+                    memcpy(&l_subsets[split.subsetOfs], &lw.wsubsets[wsplit.subsetOfs], ssize*sizeof(int));
                 }
             }
             node.split = (int)splits.size();
@@ -467,7 +467,7 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
             while( w_pidx >= 0 && w->wnodes[w_pidx].right == w_nidx )
             {
                 w_nidx = w_pidx;
-                w_pidx = lw->wnodes[w_pidx].parent;
+                w_pidx = lw.wnodes[w_pidx].parent;
                 nidx = pidx;
                 pidx = nodes[pidx].parent;
                 depth--;
@@ -476,7 +476,7 @@ int DTreesImpl::addTree_MP( const vector<int>& sidx, const Ptr<TrainData>& train
             if( w_pidx < 0 )
                 break;
 
-            w_nidx = lw->wnodes[w_pidx].right;
+            w_nidx = lw.wnodes[w_pidx].right;
             CV_Assert( w_nidx >= 0 );
         }
     }
