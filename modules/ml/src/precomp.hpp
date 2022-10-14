@@ -325,8 +325,9 @@ namespace ml
         virtual int addNodeAndTrySplit( int parent, const vector<int>& sidx );
         virtual int addNodeAndTrySplit_MP( int parent, const vector<int>& sidx, WorkData& lw );
         virtual const vector<int>& getActiveVars();
-        virtual int findBestSplit( const vector<int>& _sidx );
+		virtual int findBestSplit( const vector<int>& _sidx, WorkData *lw = NULL );
         virtual void calcValue( int nidx, const vector<int>& _sidx );
+		virtual void calcValue_MP( int nidx, const vector<int>& _sidx, WorkData *lw );
 
         virtual WSplit findSplitOrdClass( int vi, const vector<int>& _sidx, double initQuality );
 
@@ -337,7 +338,7 @@ namespace ml
         virtual WSplit findSplitOrdReg( int vi, const vector<int>& _sidx, double initQuality );
         virtual WSplit findSplitCatReg( int vi, const vector<int>& _sidx, double initQuality, int* subset );
 
-        virtual int calcDir( int splitidx, const vector<int>& _sidx, vector<int>& _sleft, vector<int>& _sright );
+		virtual int calcDir( int splitidx, const vector<int>& _sidx, vector<int>& _sleft, vector<int>& _sright, WorkData *lw = NULL );
         virtual int pruneCV( int root );
 
         virtual double updateTreeRNC( int root, double T, int fold );

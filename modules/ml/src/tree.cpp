@@ -583,7 +583,7 @@ int DTreesImpl::addNodeAndTrySplit_MP( int parent, const vector<int>& sidx, Work
     bool can_split = true;
     vector<int> sleft, sright;
 
-    calcValue( nidx, sidx );
+	calcValue_MP( nidx, sidx, &lw );
 
     if( n <= params.getMinSampleCount() || node.depth >= params.getMaxDepth() )
         can_split = false;
@@ -605,28 +605,33 @@ int DTreesImpl::addNodeAndTrySplit_MP( int parent, const vector<int>& sidx, Work
     }
 
     if( can_split )
-        node.split = findBestSplit( sidx );
+		node.split = findBestSplit( sidx, &lw );
 
     //printf("depth=%d, nidx=%d, parent=%d, n=%d, %s, value=%.1f, risk=%.1f\n", node.depth, nidx, node.parent, n, (node.split < 0 ? "leaf" : varType[w->wsplits[node.split].varIdx] == VAR_CATEGORICAL ? "cat" : "ord"), node.value, node.node_risk);
 
     if( node.split >= 0 )
     {
-        node.defaultDir = calcDir( node.split, sidx, sleft, sright );
+		node.defaultDir = calcDir( node.split, sidx, sleft, sright, &lw );
         if( params.useSurrogates )
             CV_Error( CV_StsNotImplemented, "surrogate splits are not implemented yet");
 
-        int left = addNodeAndTrySplit( nidx, sleft );
-        int right = addNodeAndTrySplit( nidx, sright );
-        w->wnodes[nidx].left = left;
-        w->wnodes[nidx].right = right;
-        CV_Assert( w->wnodes[nidx].left > 0 && w->wnodes[nidx].right > 0 );
+		int left = addNodeAndTrySplit_MP( nidx, sleft, lw );
+		int right = addNodeAndTrySplit_MP( nidx, sright, lw );
+		lw.wnodes[nidx].left = left;
+		lw.wnodes[nidx].right = right;
+		CV_Assert( lw.wnodes[nidx].left > 0 && lw.wnodes[nidx].right > 0 );
     }
 
     return nidx;
 }
 
-int DTreesImpl::findBestSplit( const vector<int>& _sidx )
+int DTreesImpl::findBestSplit( const vector<int>& _sidx, WorkData *lw )
 {
+	WorkData *w;
+	if (lw != NULL)
+		w = lw;
+	else
+		w = this->w;
     const vector<int>& activeVars = getActiveVars();
     int splitidx = -1;
     int vi_, nv = (int)activeVars.size();
@@ -681,7 +686,7 @@ void DTreesImpl::calcValue( int nidx, const vector<int>& _sidx )
     int i, j, k, n = (int)_sidx.size(), cv_n = params.getCVFolds();
     int m = (int)classLabels.size();
 
-    cv::AutoBuffer<double> buf(std::max(m, 3)*(cv_n+1));
+	cv::AutoBuffer<double> buf(fmax(m, 3)*(cv_n+1));
 
     if( cv_n > 0 )
     {
@@ -849,6 +854,182 @@ void DTreesImpl::calcValue( int nidx, const vector<int>& _sidx )
         node->node_risk /= sumw;
         node->value = sum/sumw;
     }
+}
+
+void DTreesImpl::calcValue_MP( int nidx, const vector<int>& _sidx, WorkData *lw )
+{
+	WNode* node = &lw->wnodes[nidx];
+	int i, j, k, n = (int)_sidx.size(), cv_n = params.getCVFolds();
+	int m = (int)classLabels.size();
+
+	cv::AutoBuffer<double> buf(std::max(m, 3)*(cv_n+1));
+
+	if( cv_n > 0 )
+	{
+		size_t sz = lw->cv_Tn.size();
+		lw->cv_Tn.resize(sz + cv_n);
+		lw->cv_node_risk.resize(sz + cv_n);
+		lw->cv_node_error.resize(sz + cv_n);
+	}
+
+	if( _isClassifier )
+	{
+		// in case of classification tree:
+		//  * node value is the label of the class that has the largest weight in the node.
+		//  * node risk is the weighted number of misclassified samples,
+		//  * j-th cross-validation fold value and risk are calculated as above,
+		//    but using the samples with cv_labels(*)!=j.
+		//  * j-th cross-validation fold error is calculated as the weighted number of
+		//    misclassified samples with cv_labels(*)==j.
+
+		// compute the number of instances of each class
+		double* cls_count = buf.data();
+		double* cv_cls_count = cls_count + m;
+
+		double max_val = -1, total_weight = 0;
+		int max_k = -1;
+
+		for( k = 0; k < m; k++ )
+			cls_count[k] = 0;
+
+		if( cv_n == 0 )
+		{
+			for( i = 0; i < n; i++ )
+			{
+				int si = _sidx[i];
+				cls_count[lw->cat_responses[si]] += w->sample_weights[si];
+			}
+		}
+		else
+		{
+			for( j = 0; j < cv_n; j++ )
+				for( k = 0; k < m; k++ )
+					cv_cls_count[j*m + k] = 0;
+
+			for( i = 0; i < n; i++ )
+			{
+				int si = _sidx[i];
+				j = lw->cv_labels[si]; k = lw->cat_responses[si];
+				cv_cls_count[j*m + k] += w->sample_weights[si];
+			}
+
+			for( j = 0; j < cv_n; j++ )
+				for( k = 0; k < m; k++ )
+					cls_count[k] += cv_cls_count[j*m + k];
+		}
+
+		for( k = 0; k < m; k++ )
+		{
+			double val = cls_count[k];
+			total_weight += val;
+			if( max_val < val )
+			{
+				max_val = val;
+				max_k = k;
+			}
+		}
+
+		node->class_idx = max_k;
+		node->value = classLabels[max_k];
+		node->node_risk = total_weight - max_val;
+
+		for( j = 0; j < cv_n; j++ )
+		{
+			double sum_k = 0, sum = 0, max_val_k = 0;
+			max_val = -1; max_k = -1;
+
+			for( k = 0; k < m; k++ )
+			{
+				double val_k = cv_cls_count[j*m + k];
+				double val = cls_count[k] - val_k;
+				sum_k += val_k;
+				sum += val;
+				if( max_val < val )
+				{
+					max_val = val;
+					max_val_k = val_k;
+					max_k = k;
+				}
+			}
+
+			w->cv_Tn[nidx*cv_n + j] = INT_MAX;
+			w->cv_node_risk[nidx*cv_n + j] = sum - max_val;
+			w->cv_node_error[nidx*cv_n + j] = sum_k - max_val_k;
+		}
+	}
+	else
+	{
+		// in case of regression tree:
+		//  * node value is 1/n*sum_i(Y_i), where Y_i is i-th response,
+		//    n is the number of samples in the node.
+		//  * node risk is the sum of squared errors: sum_i((Y_i - <node_value>)^2)
+		//  * j-th cross-validation fold value and risk are calculated as above,
+		//    but using the samples with cv_labels(*)!=j.
+		//  * j-th cross-validation fold error is calculated
+		//    using samples with cv_labels(*)==j as the test subset:
+		//    error_j = sum_(i,cv_labels(i)==j)((Y_i - <node_value_j>)^2),
+		//    where node_value_j is the node value calculated
+		//    as described in the previous bullet, and summation is done
+		//    over the samples with cv_labels(*)==j.
+		double sum = 0, sum2 = 0, sumw = 0;
+
+		if( cv_n == 0 )
+		{
+			for( i = 0; i < n; i++ )
+			{
+				int si = _sidx[i];
+				double wval = w->sample_weights[si];
+				double t = w->ord_responses[si];
+				sum += t*wval;
+				sum2 += t*t*wval;
+				sumw += wval;
+			}
+		}
+		else
+		{
+			double *cv_sum = buf.data(), *cv_sum2 = cv_sum + cv_n;
+			double* cv_count = (double*)(cv_sum2 + cv_n);
+
+			for( j = 0; j < cv_n; j++ )
+			{
+				cv_sum[j] = cv_sum2[j] = 0.;
+				cv_count[j] = 0;
+			}
+
+			for( i = 0; i < n; i++ )
+			{
+				int si = _sidx[i];
+				j = w->cv_labels[si];
+				double wval = w->sample_weights[si];
+				double t = w->ord_responses[si];
+				cv_sum[j] += t*wval;
+				cv_sum2[j] += t*t*wval;
+				cv_count[j] += wval;
+			}
+
+			for( j = 0; j < cv_n; j++ )
+			{
+				sum += cv_sum[j];
+				sum2 += cv_sum2[j];
+				sumw += cv_count[j];
+			}
+
+			for( j = 0; j < cv_n; j++ )
+			{
+				double s = sum - cv_sum[j], si = sum - s;
+				double s2 = sum2 - cv_sum2[j], s2i = sum2 - s2;
+				double c = cv_count[j], ci = sumw - c;
+				double r = si/std::max(ci, DBL_EPSILON);
+				lw->cv_node_risk[nidx*cv_n + j] = s2i - r*r*ci;
+				lw->cv_node_error[nidx*cv_n + j] = s2 - 2*r*s + c*r*r;
+				lw->cv_Tn[nidx*cv_n + j] = INT_MAX;
+			}
+		}
+		CV_Assert(fabs(sumw) > 0);
+		node->node_risk = sum2 - (sum/sumw)*sum;
+		node->node_risk /= sumw;
+		node->value = sum/sumw;
+	}
 }
 
 DTreesImpl::WSplit DTreesImpl::findSplitOrdClass( int vi, const vector<int>& _sidx, double initQuality )
@@ -1345,8 +1526,14 @@ DTreesImpl::WSplit DTreesImpl::findSplitCatReg( int vi, const vector<int>& _sidx
 }
 
 int DTreesImpl::calcDir( int splitidx, const vector<int>& _sidx,
-                         vector<int>& _sleft, vector<int>& _sright )
+						 vector<int>& _sleft, vector<int>& _sright,
+						 WorkData *lw)
 {
+	WorkData *w;
+	if (lw != NULL)
+		w = lw;
+	else
+		w = this->w;
     WSplit split = w->wsplits[splitidx];
     int i, si, n = (int)_sidx.size(), vi = split.varIdx;
     _sleft.reserve(n);
