@@ -80,7 +80,7 @@ class NgraphCustomOp: public ngraph::op::Op {
 public:
     const ngraph::NodeTypeInfo& get_type_info() const override
     {
-        static constexpr ngraph::NodeTypeInfo type_info{kOpenCVLayersType, 0};
+        static constexpr ngraph::NodeTypeInfo type_info{kOpenCVLayersType, static_cast<uint64_t>(0)};
         return type_info;
     }
 
@@ -988,14 +988,6 @@ InferenceEngine::DataPtr ngraphDataOutputNode(
     return w.dataPtr;
 }
 
-void forwardNgraph(const std::vector<Ptr<BackendWrapper> >& outBlobsWrappers,
-                      Ptr<BackendNode>& node, bool isAsync)
-{
-    CV_Assert(!node.empty());
-    Ptr<InfEngineNgraphNode> ieNode = node.dynamicCast<InfEngineNgraphNode>();
-    CV_Assert(!ieNode.empty());
-    ieNode->net->forward(outBlobsWrappers, isAsync);
-}
 
 void InfEngineNgraphNet::reset()
 {
@@ -1192,12 +1184,6 @@ void InfEngineNgraphNet::forward(const std::vector<Ptr<BackendWrapper> >& outBlo
     }
 }
 
-#else
-void forwardNgraph(const std::vector<Ptr<BackendWrapper> >& outBlobsWrappers,
-                   Ptr<BackendNode>& node, bool isAsync)
-{
-    CV_Assert(false && "nGraph is not enabled in this OpenCV build");
-}
 #endif
 
 }}

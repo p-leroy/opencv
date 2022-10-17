@@ -60,6 +60,15 @@
 
 namespace cv { namespace dnn {
 
+CV__DNN_INLINE_NS_BEGIN
+namespace openvino {
+
+// TODO: use std::string as parameter
+bool checkTarget(Target target);
+
+}  // namespace openvino
+CV__DNN_INLINE_NS_END
+
 #ifdef HAVE_INF_ENGINE
 
 Backend& getInferenceEngineBackendTypeParam();
@@ -72,6 +81,8 @@ void infEngineBlobsToMats(const std::vector<InferenceEngine::Blob::Ptr>& blobs,
 
 
 CV__DNN_INLINE_NS_BEGIN
+
+void switchToOpenVINOBackend(Net& net);
 
 bool isMyriadX();
 
