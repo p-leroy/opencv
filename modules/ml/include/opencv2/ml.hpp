@@ -1319,8 +1319,6 @@ public:
      * @param nodeName name of node containing the classifier
      */
     CV_WRAP static Ptr<RTrees> load(const String& filepath , const String& nodeName = String());
-
-    CV_WRAP virtual bool train_MP( InputArray samples, int layout, InputArray responses ) = 0;
 };
 
 /****************************************************************************************\
